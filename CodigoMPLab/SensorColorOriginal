@@ -1,0 +1,255 @@
+//------------------------------------------------------------------------------
+//                                                                             *
+//    Filename:      Lab5.c                                                    *
+//    Fecha:         25/02/2020                                                *
+//    Version:       v.1                                                       *
+//    Author:        Nancy Alejandra Mazariegos                                *
+//    Carnet:        17227                                                     *
+//    Description:   Sensor de Color                                           *
+//                                                                             *
+//------------------------------------------------------------------------------
+// PIC16F887 Configuration Bit Settings
+
+//Código Slave I2C
+
+// CONFIG1
+#pragma config FOSC = INTRC_NOCLKOUT// Oscillator Selection bits (INTOSCIO oscillator: I/O function on RA6/OSC2/CLKOUT pin, I/O function on RA7/OSC1/CLKIN)
+#pragma config WDTE = OFF       // Watchdog Timer Enable bit (WDT disabled and can be enabled by SWDTEN bit of the WDTCON register)
+#pragma config PWRTE = OFF      // Power-up Timer Enable bit (PWRT disabled)
+#pragma config MCLRE = ON       // RE3/MCLR pin function select bit (RE3/MCLR pin function is MCLR)
+#pragma config CP = OFF         // Code Protection bit (Program memory code protection is disabled)
+#pragma config CPD = OFF        // Data Code Protection bit (Data memory code protection is disabled)
+#pragma config BOREN = OFF      // Brown Out Reset Selection bits (BOR disabled)
+#pragma config IESO = OFF       // Internal External Switchover bit (Internal/External Switchover mode is disabled)
+#pragma config FCMEN = OFF      // Fail-Safe Clock Monitor Enabled bit (Fail-Safe Clock Monitor is disabled)
+#pragma config LVP = OFF        // Low Voltage Programming Enable bit (RB3 pin has digital I/O, HV on MCLR must be used for programming)
+
+// CONFIG2
+#pragma config BOR4V = BOR40V   // Brown-out Reset Selection bit (Brown-out Reset set to 4.0V)
+#pragma config WRT = OFF        // Flash Program Memory Self Write Enable bits (Write protection off)
+
+// #pragma config statements should precede project file includes.
+// Use project enums instead of #define for ON and OFF.
+
+#include <xc.h>
+#define _XTAL_FREQ 8000000//Reloj interno 8Mhz
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "I2CSC.h"
+//Dato de Qué color es, envío a Master
+uint8_t Color;
+uint8_t z;
+
+
+uint8_t contadorRGB;
+uint8_t variable;
+uint8_t Frecuencia;
+uint8_t contadorRGB2;
+unsigned short Data[20];
+unsigned short Red,Green,Blue,Brightness;
+unsigned short Count = 0;
+unsigned char over = 0;
+unsigned char Colour;
+unsigned char Level, PrevLevel;
+void Setup(void);
+void InitInterrupts(void);
+void InitTimer1(void);
+void StartTimer1(void);
+void Colores(void);
+
+
+void __interrupt() isr(void){
+    if(INTF == 1)
+	{	                   
+        INTF=0;
+	}
+	if(CCP1IF == 1)
+	{	                   
+        Count = CCPR1;
+        TMR1H = 0x00;
+        TMR1L = 0x00;
+        CCP1IF = 0;
+        
+	}
+	
+	if(TMR1IF == 1)
+	{        
+        TMR1H = 0x00;
+        TMR1L = 0x00;           
+        TMR1IF = 0;
+        over = 1;
+    }  
+   if(PIR1bits.SSPIF == 1){ 
+
+        SSPCONbits.CKP = 0;
+       
+        if ((SSPCONbits.SSPOV) || (SSPCONbits.WCOL)){
+            z = SSPBUF;                 // Read the previous value to clear the buffer
+            SSPCONbits.SSPOV = 0;       // Clear the overflow flag
+            SSPCONbits.WCOL = 0;        // Clear the collision bit
+            SSPCONbits.CKP = 1;         // Enables SCL (Clock)
+        }
+
+//        if(!SSPSTATbits.D_nA && !SSPSTATbits.R_nW) {
+//            //__delay_us(7);
+//            z = SSPBUF;                 // Lectura del SSBUF para limpiar el buffer y la bandera BF
+//            //__delay_us(2);
+//            PIR1bits.SSPIF = 0;         // Limpia bandera de interrupción recepción/transmisión SSP
+//            SSPCONbits.CKP = 1;         // Habilita entrada de pulsos de reloj SCL
+//            while(!SSPSTATbits.BF);     // Esperar a que la recepción se complete
+//            PORTD = SSPBUF;             // Guardar en el PORTD el valor del buffer de recepción
+//            __delay_us(250);
+            
+      //  }
+   else if(!SSPSTATbits.D_nA && SSPSTATbits.R_nW){//Me habla
+            z = SSPBUF;
+            BF = 0;
+            SSPBUF = PORTB;
+            SSPCONbits.CKP = 1;
+            __delay_us(250);
+            while(SSPSTATbits.BF);
+        }
+       
+        PIR1bits.SSPIF = 0;    
+    }
+}
+
+
+void main(void) {
+   
+    Setup();
+    __delay_ms(250);
+    //S0 S1
+    RD2 = 0;//s0
+    RD3 = 1;//s1
+    //OE
+	RC0 = 1;
+    while(1){    
+    Colores();
+    //---
+    GIE=0;
+        if(10000/Brightness < 100)
+    {
+		if(Red < Blue && Red < Green)
+		{
+            PORTBbits.RB0=1;
+            PORTBbits.RB1=0;
+            PORTBbits.RB2=0;
+		}	
+		if(Green < Red && Green < Blue)
+		{
+			PORTBbits.RB1=1;
+            PORTBbits.RB0=0;
+            PORTBbits.RB2=0;
+		}	
+		if(Blue < Red && Blue < Green)
+		{
+			PORTBbits.RB2=1;
+            PORTBbits.RB0=0;
+            PORTBbits.RB1=0;
+		}	
+	}
+    else 
+    {
+		PORTB=0;
+        
+	}
+    GIE=1;
+    }
+
+    }
+void Setup(void){
+    //Inicia Comuniación I2C e indica direccion del esclavo
+    I2C_Slave_Init(0x30);  
+    
+    //----------------------------------8Mhz------------------------------------
+   //Oscilador interno
+     OSCCON=0b1110001;
+     
+    //-----------------------------PUERTOS-------------------------------------- 
+    // colour s2 s3
+	TRISDbits.TRISD1 = 0;
+	TRISDbits.TRISD0 = 0;
+    // out
+	TRISCbits.TRISC2 = 1;
+    // s0 s1 = frequency
+	TRISDbits.TRISD2 = 0;	//S0	
+	TRISDbits.TRISD3 = 0;   //S1
+    
+    PORTB = 0;
+    PORTD = 0;
+    PORTA=0;
+    PORTE=0;
+    PORTD=0;  
+    
+    //----------------------------Interrupciones--------------------------------
+    ANSEL = 0; 
+    ANSELH = 0;
+    TRISCbits.TRISC3 = 1;
+    TRISCbits.TRISC0 =0;
+    TRISCbits.TRISC4 = 1;
+    //Habilita interrupciones globales y CCP1
+    InitInterrupts();
+    //Habilita Timer 1
+    InitTimer1();
+    //Inicia Timer1
+    StartTimer1();
+
+}
+
+void InitInterrupts(void)
+{
+	PEIE = 1;
+	CCP1IE = 1;
+ 	GIE = 1;
+}
+
+void Colores(void){
+	{		
+			switch(Colour)
+			{
+				case 0:
+					RD1 = 0;//RED
+					RD0 = 0;
+					__delay_ms(50);
+					Red = Count;
+					Colour++;
+				break;
+				case 1:
+					RD1 = 0;//Blue
+					RD0 = 1;
+					__delay_ms(50);
+					Blue = Count;
+					Colour++;
+				break;
+				case 2:
+					RD1 = 1;//No color
+					RD0 = 0;
+					__delay_ms(50);
+					Brightness = Count;
+					Colour++;
+				break;
+				case 3:
+					RD1 = 1;//Green
+					RD0 = 1;
+					__delay_ms(50);
+					Green = Count;
+					Colour = 0;
+				break;
+			}
+            }
+}
+
+void InitTimer1(void)
+{
+    T1CON = 0x38;
+    CCP1CON = 0x05;
+    TMR1IE = 1;			// enable timer 1 interrupt
+}
+
+void StartTimer1(void)
+{
+    TMR1ON = 1;
+}    
